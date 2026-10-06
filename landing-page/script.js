@@ -54,3 +54,130 @@ document.querySelectorAll('.media-frame img').forEach((image) => {
     image.replaceWith(placeholder);
   }, { once: true });
 });
+
+/* =========================================================
+   GA4 Event Tracking: section_view & cta_click
+   ========================================================= */
+(function initGA4Tracking() {
+  if (window.__ga4TrackingInitialized) return;
+  window.__ga4TrackingInitialized = true;
+
+  // 1. CTA 클릭 측정 (cta_click)
+  const ctaConfigs = [
+    { selector: '#cta-hero, #cta-hero-btn, [data-cta-location="hero"]', location: 'hero' },
+    { selector: '#cta-final, #cta-final-btn, [data-cta-location="final"]', location: 'final' }
+  ];
+
+  ctaConfigs.forEach(({ selector, location }) => {
+    const btn = document.querySelector(selector);
+    if (btn && !btn.dataset.ctaTracked) {
+      btn.dataset.ctaTracked = 'true';
+      btn.addEventListener('click', () => {
+        if (typeof window.gtag === 'function') {
+          try {
+            window.gtag('event', 'cta_click', {
+              button_location: location
+            });
+          } catch (e) {
+            console.error('GA4 cta_click error:', e);
+          }
+        }
+      });
+    }
+  });
+
+  // 2. 구간 도달 측정 (section_view)
+  const sectionTargets = [
+    { selector: '#hero-title', name: 'hero' },
+    { selector: '#detail-space-title, #detail-title', name: 'detail' },
+    { selector: '#purchase-title', name: 'cta' }
+  ];
+
+  const sentSections = new Set();
+  const headerElem = document.querySelector('.site-header');
+  const headerHeight = headerElem ? headerElem.offsetHeight : 72;
+
+  function sendSectionView(sectionName) {
+    if (sentSections.has(sectionName)) return;
+    sentSections.add(sectionName);
+    if (typeof window.gtag === 'function') {
+      try {
+        window.gtag('event', 'section_view', {
+          section_name: sectionName
+        });
+      } catch (e) {
+        console.error('GA4 section_view error:', e);
+      }
+    }
+  }
+
+  function isElementHalfVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const currentHeaderH = headerElem ? headerElem.offsetHeight : 72;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+
+    const visibleTop = Math.max(rect.top, currentHeaderH);
+    const visibleBottom = Math.min(rect.bottom, viewportHeight);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+    return rect.height > 0 && (visibleHeight / rect.height) >= 0.5;
+  }
+
+  function checkCurrentlyVisibleSections() {
+    if (document.visibilityState !== 'visible') return;
+    sectionTargets.forEach(({ selector, name }) => {
+      if (sentSections.has(name)) return;
+      const el = document.querySelector(selector);
+      if (el && isElementHalfVisible(el)) {
+        sendSectionView(name);
+        if (sectionObserver) {
+          sectionObserver.unobserve(el);
+        }
+      }
+    });
+  }
+
+  let sectionObserver = null;
+
+  if ('IntersectionObserver' in window) {
+    sectionObserver = new IntersectionObserver((entries) => {
+      if (document.visibilityState !== 'visible') return;
+
+      entries.forEach((entry) => {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+          const targetConfig = sectionTargets.find((t) => {
+            const el = document.querySelector(t.selector);
+            return el === entry.target;
+          });
+
+          if (targetConfig && !sentSections.has(targetConfig.name)) {
+            sendSectionView(targetConfig.name);
+            sectionObserver.unobserve(entry.target);
+          }
+        }
+      });
+    }, {
+      threshold: 0.5,
+      rootMargin: `-${headerHeight}px 0px 0px 0px`
+    });
+
+    sectionTargets.forEach(({ selector, name }) => {
+      if (sentSections.has(name)) return;
+      const el = document.querySelector(selector);
+      if (el) {
+        sectionObserver.observe(el);
+      }
+    });
+  }
+
+  if (document.visibilityState === 'visible') {
+    checkCurrentlyVisibleSections();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkCurrentlyVisibleSections();
+    }
+  });
+})();
